@@ -7,9 +7,9 @@ import numpy as np
 import time
 
 # ----------------- MongoDB Setup -----------------
-MONGODB_URI = "mongodb+srv://Kamlesh-21:Guru2004@attendencesystem.nlapsic.mongodb.net/Attendencesystem?retryWrites=true&w=majority&appName=Attendencesystem"
+MONGODB_URI = "mongodb://127.0.0.1:27017/face-recognition_db"
 client = MongoClient(MONGODB_URI)
-db = client['facerecognition_db']
+db = client['face-recognition_db']
 collection = db['users']
 
 # ----------------- Face Detector -----------------
@@ -31,7 +31,8 @@ def detect_faces(image):
 def extract_embedding(face_img):
     try:
         embedding = DeepFace.represent(face_img, model_name='Facenet512', detector_backend='skip')
-        return embedding[0]['embedding']
+        emb = embedding[0]['embedding']
+        return np.array(emb, dtype=float)
     except Exception as e:
         print("Error extracting embedding:", e)
         return None
@@ -43,8 +44,8 @@ def auto_register_user(user_id, name, wait_time=5):
     wait_time: Seconds to wait before registering (to stabilize face).
     """
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 700)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 700)
     print(f"Looking for {name}'s face. Please look at the camera for {wait_time} seconds...")
 
     start_time = time.time()
@@ -67,7 +68,7 @@ def auto_register_user(user_id, name, wait_time=5):
                     user_data = {
                         'user_id': user_id,
                         'name': name,
-                        'embedding': embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                        'embedding': embedding.tolist() if isinstance(embedding, np.ndarray) else np.array(embedding, dtype=float).tolist()
                     }
                     collection.insert_one(user_data)
                     print(f"User {name} registered successfully.")
@@ -121,8 +122,18 @@ def live_recognition():
             min_distance = float('inf')
 
             for user in users:
-                stored_embedding = user['embedding']
-                distance = cosine(embedding, stored_embedding)
+                stored_embedding = user.get('embedding')
+                if stored_embedding is None:
+                    continue
+                # Ensure both embeddings are numpy arrays of float
+                try:
+                    se = np.array(stored_embedding, dtype=float)
+                    en = np.array(embedding, dtype=float)
+                except Exception:
+                    continue
+                if se.shape != en.shape:
+                    continue
+                distance = cosine(en, se)
                 if distance < min_distance:
                     min_distance = distance
                     best_match = user
