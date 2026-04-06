@@ -130,6 +130,7 @@ export default function StudentRegistrationForm() {
       const data = await res.json();
       
       if (data.success) {
+        localStorage.setItem("studentId", formData.studentId);
         setStatus(`✅ Student registered successfully! ID: ${formData.studentId}`);
         setTimeout(() => router.replace(dashboardPath), 1200);
       } else {

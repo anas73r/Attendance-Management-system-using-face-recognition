@@ -10,7 +10,7 @@ import time
 MONGODB_URI = "mongodb://127.0.0.1:27017/face-recognition_db"
 client = MongoClient(MONGODB_URI)
 db = client['face-recognition_db']
-collection = db['users']
+collection = db['users'] 
 
 # ----------------- Face Detector -----------------
 detector = MTCNN()

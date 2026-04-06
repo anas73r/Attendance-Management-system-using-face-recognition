@@ -3,9 +3,11 @@
 import io
 import base64
 import numpy as np
+import os
+import pandas as pd
 from flask import Blueprint, request, jsonify, current_app
 from bson.objectid import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 from scipy.spatial.distance import cosine
 from deepface import DeepFace
@@ -183,6 +185,9 @@ def create_session():
     db = current_app.config.get("DB")
     students_col = db.students
 
+    duration_mins = int(data.get("duration", 15))
+    expires_at_dt = datetime.now() + timedelta(minutes=duration_mins)
+
     # Build base session document
     session_doc = {
         "date": data.get("date"),
@@ -190,6 +195,8 @@ def create_session():
         "department": data.get("department"),
         "year": data.get("year"),
         "division": data.get("division"),
+        "duration": duration_mins,
+        "expires_at": expires_at_dt,
         "created_at": datetime.now(),
         "finalized": False,
         "ended_at": None,
@@ -223,6 +230,54 @@ def create_session():
     collection = get_attendance_collection()
     session_id = collection.insert_one(session_doc).inserted_id
     return jsonify({"session_id": str(session_id), "students_count": len(session_doc["students"])})
+
+def export_to_excel_master(session_doc, present_students, all_students):
+    try:
+        report_dir = os.path.join(current_app.root_path, "Attendance_Reports")
+        os.makedirs(report_dir, exist_ok=True)
+        
+        dept = session_doc.get("department", "All")
+        year = session_doc.get("year", "All")
+        div = session_doc.get("division", "All")
+        
+        file_name = f"Master_Attendance_{dept}_{year}_{div}.xlsx"
+        file_path = os.path.join(report_dir, file_name)
+        
+        date_str = session_doc.get("date", datetime.now().strftime("%Y-%m-%d"))
+        sub = session_doc.get("subject", "Subject")
+        session_col = f"{date_str} ({sub})"
+        
+        if os.path.exists(file_path):
+            df = pd.read_excel(file_path)
+        else:
+            df = pd.DataFrame(columns=["Student ID", "Student Name", "Department", "Year", "Division"])
+            
+        for s in all_students:
+            sid = s.get("studentId") or s.get("student_id")
+            sname = s.get("studentName") or s.get("student_name")
+            
+            if sid not in df["Student ID"].values:
+                new_row = {
+                    "Student ID": sid,
+                    "Student Name": sname,
+                    "Department": s.get("department", dept),
+                    "Year": s.get("year", year),
+                    "Division": s.get("division", div)
+                }
+                new_row_df = pd.DataFrame([new_row])
+                if not new_row_df.empty and not new_row_df.isna().all().all():
+                    df = pd.concat([df, new_row_df], ignore_index=True)
+            
+            matched_indices = df.index[df['Student ID'] == sid].tolist()
+            if matched_indices:
+                row_idx = matched_indices[0]
+                status = "Present" if sid in present_students else "Absent"
+                df.loc[row_idx, session_col] = status
+            
+        df.to_excel(file_path, index=False)
+        logger.info(f"Successfully updated master attendance Excel at {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to export to Excel: {e}")
 
 @attendance_session_bp.route("/end_session", methods=["POST"])
 def end_session():
@@ -289,6 +344,9 @@ def end_session():
             {"$set": {"finalized": True, "ended_at": datetime.now()}}
         )
 
+        # Export updated master sheet
+        export_to_excel_master(session_doc, present_students, all_students)
+
         logger.info(f"Session finalized: {len(present_students)} present, {absent_count} absent")
 
         return jsonify({
@@ -338,6 +396,11 @@ def mark_attendance_with_duplicate_prevention():
             return jsonify({"error": "Session not found"}), 404
         if session_doc.get("finalized"):
             return jsonify({"error": "Session already finalized"}), 400
+            
+        # Check if expired
+        expires_at = session_doc.get("expires_at")
+        if expires_at and datetime.now() > expires_at:
+            return jsonify({"error": "Attendance session has timed out"}), 400
 
         # GET LIST OF ALREADY MARKED STUDENTS IN THIS SESSION
         already_present_students = set()

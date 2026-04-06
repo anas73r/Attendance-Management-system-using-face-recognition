@@ -117,4 +117,5 @@ def get_student_count():
 def get_departments():
     db = current_app.config.get("DB")
     departments = db.students.distinct("department")
+    print(departments)
     return jsonify({"success": True, "departments": departments, "count": len(departments)})

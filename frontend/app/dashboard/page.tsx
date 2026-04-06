@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeCard, setActiveCard] = useState<number | null>(null);
+  const [hasStudentId, setHasStudentId] = useState<boolean>(false);
 
   useEffect(() => {
     const checkAuthStatus = () => {
@@ -35,6 +36,11 @@ export default function DashboardPage() {
           setIsLoggedIn(true);
           setUsername(storedUsername || "User");
           setUserEmail(storedEmail || "");
+          
+          const studentId = localStorage.getItem("studentId");
+          if (studentId) {
+            setHasStudentId(true);
+          }
         }
       } catch (error) {
         console.error("localStorage not available:", error);
@@ -61,6 +67,7 @@ export default function DashboardPage() {
     localStorage.removeItem("username");
     localStorage.removeItem("userEmail");
     localStorage.removeItem("userId");
+    localStorage.removeItem("studentId");
     
     router.push("/");
   };
@@ -107,6 +114,10 @@ export default function DashboardPage() {
       iconBg: "bg-amber-500"
     }
   ];
+
+  const visibleOptions = studentManagementOptions.filter(option => 
+    !(option.title === "Student Registration" && hasStudentId)
+  );
 
   if (isLoggedIn === null) {
     return (
@@ -176,7 +187,7 @@ export default function DashboardPage() {
         <div className="lg:hidden bg-white/95 backdrop-blur-lg border-b border-slate-200 shadow-lg">
           <div className="px-4 sm:px-6 py-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {studentManagementOptions.map((option, index) => (
+              {visibleOptions.map((option, index) => (
                 <div
                   key={index}
                   onClick={() => {
@@ -220,7 +231,7 @@ export default function DashboardPage() {
 
           {/* Student Management Tools Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {studentManagementOptions.map((option, index) => (
+            {visibleOptions.map((option, index) => (
               <div
                 key={index}
                 onMouseEnter={() => setActiveCard(index)}

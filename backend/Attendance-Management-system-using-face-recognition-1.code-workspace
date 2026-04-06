@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../Attendance-Management-system-using-face-recognition"
+		}
+	],
+	"settings": {
+		"extensions.ignoreRecommendations": true,
+		"debug.allowBreakpointsEverywhere": true
+	}
+}

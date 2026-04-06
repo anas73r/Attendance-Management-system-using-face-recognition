@@ -1,4 +1,4 @@
-// File: C:\Users\HP\Downloads\ROSPL-main\ROSPL-main\frontend\app\signin\page.tsx
+// File: C:\Users\LENOVO\OneDrive\Desktop\minorproject\Attendance-Management-system-using-face-recognition-1\frontend\app\signin\page.tsx
 import * as entry from '../../../../app/signin/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

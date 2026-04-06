@@ -13,6 +13,7 @@ export default function DemoSessionPage() {
   const [status, setStatus] = useState("");
   const [facesData, setFacesData] = useState<FaceData[]>([]);
   const [recognizedStudents, setRecognizedStudents] = useState<string[]>([]);
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
 
   const [form, setForm] = useState({
     date: "",
@@ -20,7 +21,36 @@ export default function DemoSessionPage() {
     department: "",
     year: "",
     division: "",
+    duration: "1",
   });
+
+  const handleEndSessionApi = async (sid: string) => {
+    try {
+      await fetch("http://localhost:5000/api/attendance/end_session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sid })
+      });
+    } catch(err) {
+      console.error("Failed to end session auto", err);
+    }
+  };
+
+  React.useEffect(() => {
+    if (sessionActive && timeRemaining !== null && timeRemaining > 0) {
+      const timerId = setTimeout(() => {
+        setTimeRemaining(timeRemaining - 1);
+      }, 1000);
+      return () => clearTimeout(timerId);
+    } else if (sessionActive && timeRemaining === 0) {
+      setRecognitionStarted(false);
+      setSessionActive(false);
+      setStatus("⏰ Session Expired & Finalized!");
+      if (sessionId) {
+        handleEndSessionApi(sessionId);
+      }
+    }
+  }, [sessionActive, timeRemaining, sessionId]);
 
   const departments = ["Computer Science", "IT", "Electronics", "Mechanical", "Civil"];
   const years = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
@@ -48,6 +78,7 @@ export default function DemoSessionPage() {
         setSessionId(data.session_id);
         setStatus("✅ Session created! Click Start Recognition.");
         setSessionActive(true);
+        setTimeRemaining(parseInt(form.duration) * 60);
       } else {
         setStatus("❌ Failed to create session");
       }
@@ -76,6 +107,14 @@ export default function DemoSessionPage() {
           body: JSON.stringify(payload),
         });
         const data = await res.json();
+
+        if (data.error) {
+          setStatus(`❌ ${data.error}`);
+          if (data.error.includes("timed out")) {
+             setRecognitionStarted(false);
+          }
+          return;
+        }
 
         if (data.faces && data.faces.length > 0) {
           const face = data.faces[0];
@@ -144,6 +183,14 @@ export default function DemoSessionPage() {
 
             {/* Status Indicator */}
             <div className="flex items-center gap-3">
+              {timeRemaining !== null && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-100 border border-red-300">
+                  <span className="text-sm font-bold text-red-700">
+                    {Math.floor(timeRemaining / 60).toString().padStart(2, '0')}:
+                    {(timeRemaining % 60).toString().padStart(2, '0')}
+                  </span>
+                </div>
+              )}
               <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
                 recognitionStarted 
                   ? "bg-green-100 border border-green-300" 
@@ -310,6 +357,24 @@ export default function DemoSessionPage() {
                         ))}
                       </select>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="text-gray-700 text-sm mb-2 block font-medium">Duration (Minutes)</label>
+                    <select 
+                      name="duration" 
+                      value={form.duration} 
+                      onChange={handleChange}
+                      className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
+                    >
+                      <option value="1">1 Minute (Testing)</option>
+                      <option value="5">5 Minutes</option>
+                      <option value="10">10 Minutes</option>
+                      <option value="15">15 Minutes</option>
+                      <option value="30">30 Minutes</option>
+                      <option value="45">45 Minutes</option>
+                      <option value="60">60 Minutes</option>
+                    </select>
                   </div>
 
                   <button 

@@ -1,4 +1,4 @@
-// File: C:\Users\HP\Downloads\ROSPL-main\ROSPL-main\frontend\app\layout.tsx
+// File: C:\Users\LENOVO\OneDrive\Desktop\minorproject\Attendance-Management-system-using-face-recognition-1\frontend\app\layout.tsx
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
