@@ -13,6 +13,7 @@ from scipy.spatial.distance import cosine
 from deepface import DeepFace
 import logging
 import time
+from utils import normalize_student_id
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,7 @@ def create_session():
     try:
         students = list(students_col.find(student_filter)) if student_filter else []
         for s in students:
-            sid = s.get("studentId") or s.get("student_id")
+            sid = normalize_student_id(s.get("studentId") or s.get("student_id"))
             name = s.get("studentName") or s.get("student_name")
             session_doc["students"].append({
                 "student_id": sid,
@@ -231,7 +232,8 @@ def create_session():
     session_id = collection.insert_one(session_doc).inserted_id
     return jsonify({"session_id": str(session_id), "students_count": len(session_doc["students"])})
 
-def export_to_excel_master(session_doc, present_students, all_students):
+def export_to_excel_master(session_doc, all_students):
+    """Update the cumulative master attendance sheet for the class"""
     try:
         report_dir = os.path.join(current_app.root_path, "Attendance_Reports")
         os.makedirs(report_dir, exist_ok=True)
@@ -247,37 +249,165 @@ def export_to_excel_master(session_doc, present_students, all_students):
         sub = session_doc.get("subject", "Subject")
         session_col = f"{date_str} ({sub})"
         
+        # Calculate present IDs directly from session_doc
+        present_ids_str = {
+            normalize_student_id(s.get("student_id")) 
+            for s in session_doc.get("students", []) 
+            if s.get("present") == True
+        }
+        logger.info(f"📊 Derived {len(present_ids_str)} present students from session doc")
+
         if os.path.exists(file_path):
-            df = pd.read_excel(file_path)
+            try:
+                df = pd.read_excel(file_path)
+                # Ensure Student ID column is string and normalized
+                if "Student ID" in df.columns:
+                    df["Student ID"] = df["Student ID"].astype(str).apply(normalize_student_id)
+                else:
+                    logger.warning(f"Column 'Student ID' not found in {file_path}")
+            except Exception as e:
+                logger.error(f"Error reading existing Excel: {e}")
+                df = pd.DataFrame(columns=["Student ID", "Student Name", "Department", "Year", "Division"])
         else:
             df = pd.DataFrame(columns=["Student ID", "Student Name", "Department", "Year", "Division"])
             
+        # Consolidate all students
+        student_id_map = {}
         for s in all_students:
-            sid = s.get("studentId") or s.get("student_id")
-            sname = s.get("studentName") or s.get("student_name")
-            
-            if sid not in df["Student ID"].values:
-                new_row = {
-                    "Student ID": sid,
-                    "Student Name": sname,
-                    "Department": s.get("department", dept),
-                    "Year": s.get("year", year),
-                    "Division": s.get("division", div)
+            sid = normalize_student_id(s.get("studentId") or s.get("student_id", ""))
+            if sid:
+                student_id_map[sid] = {
+                    "id": sid,
+                    "name": s.get("studentName") or s.get("student_name", "Unknown"),
+                    "dept": s.get("department", dept),
+                    "year": s.get("year", year),
+                    "div": s.get("division", div)
                 }
-                new_row_df = pd.DataFrame([new_row])
-                if not new_row_df.empty and not new_row_df.isna().all().all():
-                    df = pd.concat([df, new_row_df], ignore_index=True)
+        
+        # Merge students from session doc
+        for entry in session_doc.get("students", []):
+            sid = normalize_student_id(entry.get("student_id", ""))
+            if sid and sid not in student_id_map:
+                student_id_map[sid] = {
+                    "id": sid,
+                    "name": entry.get("student_name", "Unknown"),
+                    "dept": dept,
+                    "year": year,
+                    "div": div
+                }
+
+        for sid, sinfo in student_id_map.items():
+            sname = sinfo["name"]
             
-            matched_indices = df.index[df['Student ID'] == sid].tolist()
+            # Ensure sid is string for comparison
+            sid_str = str(sid)
+            
+            if sid_str not in df["Student ID"].values:
+                new_row = {
+                    "Student ID": sid_str,
+                    "Student Name": sname,
+                    "Department": sinfo["dept"],
+                    "Year": sinfo["year"],
+                    "Division": sinfo["div"]
+                }
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            
+            # Match using string comparison
+            matched_indices = df.index[df['Student ID'].astype(str) == sid_str].tolist()
             if matched_indices:
                 row_idx = matched_indices[0]
-                status = "Present" if sid in present_students else "Absent"
+                status = "Present" if sid_str in present_ids_str else "Absent"
                 df.loc[row_idx, session_col] = status
+                if status == "Present":
+                    logger.info(f"✅ Master: {sname} ({sid_str}) -> {status}")
             
         df.to_excel(file_path, index=False)
-        logger.info(f"Successfully updated master attendance Excel at {file_path}")
+        logger.info(f"💾 Master Excel updated: {file_path}")
+        return file_path
     except Exception as e:
-        logger.error(f"Failed to export to Excel: {e}")
+        logger.error(f"❌ Master Excel Export failed: {e}")
+        return None
+
+def export_session_to_excel(session_doc, all_students):
+    """Create a detailed Excel report for a single session"""
+    try:
+        report_dir = os.path.join(current_app.root_path, "Attendance_Reports", "Sessions")
+        os.makedirs(report_dir, exist_ok=True)
+        
+        date_str = session_doc.get("date", datetime.now().strftime("%Y-%m-%d"))
+        sub = session_doc.get("subject", "Subject").replace(" ", "_")
+        dept = session_doc.get("department", "All")
+        
+        file_name = f"Session_{date_str}_{sub}_{dept}.xlsx"
+        file_path = os.path.join(report_dir, file_name)
+        report_data = []
+
+        # Derive present IDs directly from session_doc
+        present_ids_str = {
+            normalize_student_id(s.get("student_id")) 
+            for s in session_doc.get("students", []) 
+            if s.get("present") == True
+        }
+        
+        # Consolidate students
+        student_id_map = {}
+        for s in all_students:
+            sid = normalize_student_id(s.get("studentId") or s.get("student_id", ""))
+            if sid:
+                student_id_map[sid] = {
+                    "id": sid,
+                    "name": s.get("studentName") or s.get("student_name", "Unknown"),
+                    "dept": s.get("department", dept),
+                    "year": s.get("year", "N/A"),
+                    "div": s.get("division", "N/A")
+                }
+            
+        for entry in session_doc.get("students", []):
+            sid = normalize_student_id(entry.get("student_id", ""))
+            if sid and sid not in student_id_map:
+                student_id_map[sid] = {
+                    "id": sid,
+                    "name": entry.get("student_name", "Unknown"),
+                    "dept": dept,
+                    "year": session_doc.get("year", "N/A"),
+                    "div": session_doc.get("division", "N/A")
+                }
+
+        for sid, sinfo in student_id_map.items():
+            sid_str = str(sid)
+            sname = sinfo["name"]
+            status = "Present" if sid_str in present_ids_str else "Absent"
+            
+            marked_at = "N/A"
+            if status == "Present":
+                for entry in session_doc.get("students", []):
+                    entry_sid = normalize_student_id(entry.get("student_id"))
+                    if entry_sid == sid_str:
+                        m_at = entry.get("marked_at")
+                        if m_at:
+                            if isinstance(m_at, datetime):
+                                marked_at = m_at.strftime("%H:%M:%S")
+                            else:
+                                marked_at = str(m_at)
+                        break
+            
+            report_data.append({
+                "Student ID": sid_str,
+                "Student Name": sname,
+                "Status": status,
+                "Marked At": marked_at,
+                "Department": sinfo.get("dept", "N/A"),
+                "Year": sinfo.get("year", "N/A"),
+                "Division": sinfo.get("div", "N/A")
+            })
+            
+        df = pd.DataFrame(report_data)
+        df.to_excel(file_path, index=False)
+        logger.info(f"✅ Session Excel saved: {file_path}")
+        return file_path
+    except Exception as e:
+        logger.error(f"❌ Session Excel Export failed: {e}")
+        return None
 
 @attendance_session_bp.route("/end_session", methods=["POST"])
 def end_session():
@@ -312,11 +442,13 @@ def end_session():
         
         # Mark absent students
         absent_count = 0
+        normalized_present_ids = {normalize_student_id(pid) for pid in present_students}
+        
         for s in all_students:
-            sid = s.get("studentId") or s.get("student_id")
+            sid = normalize_student_id(s.get("studentId") or s.get("student_id"))
             sname = s.get("studentName") or s.get("student_name")
             
-            if sid not in present_students:
+            if sid not in normalized_present_ids:
                 # Update existing entry or create new absent entry
                 updated = collection.update_one(
                     {"_id": ObjectId(session_id), "students.student_id": sid},
@@ -344,17 +476,29 @@ def end_session():
             {"$set": {"finalized": True, "ended_at": datetime.now()}}
         )
 
-        # Export updated master sheet
-        export_to_excel_master(session_doc, present_students, all_students)
+        # Re-fetch latest session data to ensure we have all marking updates
+        latest_session_doc = collection.find_one({"_id": ObjectId(session_id)}) or session_doc
 
-        logger.info(f"Session finalized: {len(present_students)} present, {absent_count} absent")
+        # Export updated master sheet and individual session report
+        # We no longer pass present_students set, functions derive it from latest_session_doc
+        master_report_path = export_to_excel_master(latest_session_doc, all_students)
+        session_report_path = export_session_to_excel(latest_session_doc, all_students)
+
+        # Recalculate stats for response
+        final_present_count = sum(1 for s in latest_session_doc.get("students", []) if s.get("present"))
+        
+        logger.info(f"Session finalized: {final_present_count} present, {absent_count} absent")
 
         return jsonify({
             "success": True,
             "statistics": {
-                "present_count": len(present_students),
+                "present_count": final_present_count,
                 "absent_count": absent_count,
                 "total_students": len(all_students)
+            },
+            "reports": {
+                "master_report": master_report_path,
+                "session_report": session_report_path
             }
         })
 
@@ -449,11 +593,12 @@ def mark_attendance_with_duplicate_prevention():
                     best = student
 
             if min_d < threshold and best:
-                student_id = best.get("studentId")
+                student_id = normalize_student_id(best.get("studentId"))
                 student_name = best.get("studentName")
 
                 # CHECK FOR DUPLICATE BEFORE MARKING
-                if student_id in already_present_students:
+                normalized_already_present = {normalize_student_id(pid) for pid in already_present_students}
+                if student_id in normalized_already_present:
                     # Student already marked present in this session
                     results.append({
                         "match": {"user_id": student_id, "name": student_name},
@@ -541,84 +686,6 @@ def mark_attendance_with_duplicate_prevention():
     except Exception as e:
         logger.error(f"Attendance error: {e}")
         return jsonify({"error": str(e)}), 500
-
-    """Finalize an attendance session with enhanced logging"""
-    data = request.get_json()
-    session_id = data.get("session_id")
-    if not session_id:
-        return jsonify({"error": "Missing session_id"}), 400
-
-    try:
-        collection = get_attendance_collection()
-        db = current_app.config.get("DB")
-        students_col = db.students
-
-        session_doc = collection.find_one({"_id": ObjectId(session_id)})
-        if not session_doc:
-            return jsonify({"error": "Session not found"}), 404
-
-        # Build set of present student ids
-        present_students = set(
-            s.get("student_id") for s in session_doc.get("students", []) 
-            if s.get("present")
-        )
-
-        # Get all students in that class
-        student_filter = {}
-        if session_doc.get("department"): student_filter["department"] = session_doc.get("department")
-        if session_doc.get("year"): student_filter["year"] = session_doc.get("year")
-        if session_doc.get("division"): student_filter["division"] = session_doc.get("division")
-
-        all_students = list(students_col.find(student_filter)) if student_filter else []
-        
-        # Mark absent students
-        absent_count = 0
-        for s in all_students:
-            sid = s.get("studentId") or s.get("student_id")
-            sname = s.get("studentName") or s.get("student_name")
-            
-            if sid not in present_students:
-                # Update existing entry or create new absent entry
-                updated = collection.update_one(
-                    {"_id": ObjectId(session_id), "students.student_id": sid},
-                    {"$set": {"students.$.present": False, "students.$.marked_at": None}}
-                )
-                
-                if updated.matched_count == 0:
-                    # No existing entry, add new absent entry
-                    collection.update_one(
-                        {"_id": ObjectId(session_id)},
-                        {"$push": {
-                            "students": {
-                                "student_id": sid, 
-                                "student_name": sname, 
-                                "present": False, 
-                                "marked_at": None
-                            }
-                        }}
-                    )
-                absent_count += 1
-
-        # Mark session as finalized
-        collection.update_one(
-            {"_id": ObjectId(session_id)}, 
-            {"$set": {"finalized": True, "ended_at": datetime.now()}}
-        )
-
-        logger.info(f"Session finalized: {len(present_students)} present, {absent_count} absent")
-
-        return jsonify({
-            "success": True,
-            "statistics": {
-                "present_count": len(present_students),
-                "absent_count": absent_count,
-                "total_students": len(all_students)
-            }
-        })
-
-    except Exception as e:
-        logger.error(f"Error ending session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
 
 # Health check for attendance models
 @attendance_session_bp.route("/models/status", methods=["GET"])

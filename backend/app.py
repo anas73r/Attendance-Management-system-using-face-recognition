@@ -230,8 +230,9 @@ if __name__ == "__main__":
 
     # Final model verification before starting
     if model_manager.is_ready():
-        logger.info("🎯 All systems ready! Server starting on http://0.0.0.0:5000")
-        app.run(host="0.0.0.0", port=5000, debug=False)  # Set debug=False for production
+        debug_mode = os.getenv("FLASK_DEBUG", "1").strip().lower() in ("1", "true", "yes", "on")
+        logger.info(f"🎯 All systems ready! Server starting on http://0.0.0.0:5000 (debug={debug_mode})")
+        app.run(host="0.0.0.0", port=5000, debug=debug_mode, use_reloader=debug_mode)
     else:
         logger.error("❌ Cannot start server - models not ready")
         exit(1)

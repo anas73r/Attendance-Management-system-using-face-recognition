@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from bson import ObjectId
 import time
+from utils import normalize_student_id
 
 student_update_bp = Blueprint("student_update", __name__)
 
@@ -154,9 +155,9 @@ def update_student(student_id):
             return jsonify({"success": False, "error": "Invalid user type"}), 403
         
         # Check if new student ID conflicts with existing one (if changed)
-        if data.get('studentId') and data.get('studentId') != student.get('studentId'):
+        if data.get('studentId') and normalize_student_id(data.get('studentId')) != normalize_student_id(student.get('studentId')):
             existing = students_col.find_one({
-                'studentId': data.get('studentId'),
+                'studentId': normalize_student_id(data.get('studentId')),
                 '_id': {'$ne': ObjectId(student_id)}
             })
             if existing:
@@ -165,7 +166,7 @@ def update_student(student_id):
         # Update student data (preserve face data)
         update_data = {
             "studentName": data.get("studentName", student.get("studentName")),
-            "studentId": data.get("studentId", student.get("studentId")),
+            "studentId": normalize_student_id(data.get("studentId", student.get("studentId"))),
             "department": data.get("department", student.get("department")),
             "year": data.get("year", student.get("year")),
             "division": data.get("division", student.get("division")),
@@ -437,9 +438,9 @@ def update_student_teacher(student_db_id):
             return jsonify({"success": False, "error": "Student not found"}), 404
         
         # Check if new student ID conflicts with existing one (if changed)
-        if data.get('studentId') and data.get('studentId') != student.get('studentId'):
+        if data.get('studentId') and normalize_student_id(data.get('studentId')) != normalize_student_id(student.get('studentId')):
             existing = students_col.find_one({
-                'studentId': data.get('studentId'),
+                'studentId': normalize_student_id(data.get('studentId')),
                 '_id': {'$ne': ObjectId(student_db_id)}
             })
             if existing:
@@ -457,7 +458,7 @@ def update_student_teacher(student_db_id):
         # Update student data (preserve face data)
         update_data = {
             "studentName": data.get("studentName", student.get("studentName")),
-            "studentId": data.get("studentId", student.get("studentId")),
+            "studentId": normalize_student_id(data.get("studentId", student.get("studentId"))),
             "department": data.get("department", student.get("department")),
             "year": data.get("year", student.get("year")),
             "division": data.get("division", student.get("division")),

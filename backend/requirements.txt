@@ -8,3 +8,5 @@ opencv-python-headless
 scipy
 python-dotenv
 flask-bcrypt
+pandas
+openpyxl

@@ -9,19 +9,26 @@ from mtcnn import MTCNN
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import logging
+from utils import normalize_student_id
 
 student_registration_bp = Blueprint("student_registration", __name__)
-client = MongoClient("MONGODB_URI")
-db = client["DATABASE_NAME"]
-students_collection = db["students"]
-detector = MTCNN()
+# Database and detector will be initialized from app context or lazily
+db = None
+students_collection = None
+detector = None
+
+def get_detector():
+    global detector
+    if detector is None:
+        detector = MTCNN()
+    return detector
 logger = logging.getLogger(__name__)
 
 def read_image_from_bytes(b):
     img = Image.open(io.BytesIO(b)).convert('RGB')
     return np.array(img)
 
-def detect_faces_rgb(rgb_image):
+def detect_faces_rgb(rgb_image, detector):
     detections = detector.detect_faces(rgb_image)
     faces = []
     for d in detections:
@@ -61,7 +68,8 @@ def register_student():
             return jsonify({"success": False, "error": f"{field} is required"}), 400
 
     # Check uniqueness of studentId and email
-    if students_col.find_one({'studentId': data['studentId']}):
+    normalized_id = normalize_student_id(data['studentId'])
+    if students_col.find_one({'studentId': normalized_id}):
         return jsonify({"success": False, "error": "Student ID already exists"}), 400
     if students_col.find_one({'email': data['email']}):
         return jsonify({"success": False, "error": "Email already registered"}), 400
@@ -80,7 +88,7 @@ def register_student():
         except Exception:
             return jsonify({"success": False, "error": f"Invalid image data at index {idx}"}), 400
 
-        faces = detect_faces_rgb(rgb)
+        faces = detect_faces_rgb(rgb, get_detector())
         if len(faces) != 1:
             return jsonify({"success": False, "error": f"Ensure exactly one face in each image (failed at image {idx+1})"}), 400
 
@@ -90,7 +98,7 @@ def register_student():
         embeddings.append(emb.tolist())
 
     student_data = {
-        "studentId": data['studentId'],
+        "studentId": normalize_student_id(data['studentId']),
         "studentName": data['studentName'],
         "department": data['department'],
         "year": data['year'],
